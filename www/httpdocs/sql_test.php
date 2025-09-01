@@ -12,20 +12,9 @@ $conn = new mysqli($servername, $username, $password, "channel");
 
 // Check connection
 if ($conn->connect_error) {
-  die("Connection failed: " . $conn->connect_error);
+    die("Connection failed: " . $conn->connect_error);
 }
 echo "Connected successfully: <br>";
-
-$sql = "SELECT * FROM `maillist` WHERE `id` IS NOT NULL ORDER BY `id` DESC LIMIT 10;";
-$result = $conn->query($sql) or die('MySQL query error');
-while($row = $result->fetch_array(MYSQLI_ASSOC)){
-    $emails = $row["mail"];
-    $Keynote =  $row["Keynote"];
-    $Sender =  $row["Sender"];
-    $content =  $row["content"];
-    // echo "Email: $emails, Keynote: $Keynote, Sender: $Sender, Content: $content <br>";
-    echo "ID: {$row['id']}, Email: $emails, Keynote: $Keynote, Sender: $Sender <br>";
-}
 
 // Show tables in the database
 $result = $conn->query("SHOW TABLES");
@@ -41,10 +30,10 @@ if ($result && $result->num_rows > 0) {
 
 // Check connection
 if ($conn->connect_error) {
-  die("Connection failed: " . $conn->connect_error);
+    die("Connection failed: " . $conn->connect_error);
 }
 echo "Connected successfully";
-if($db_list) {
+if ($db_list) {
     echo "<br>Databases:<br>";
     while ($row = mysqli_fetch_array($db_list)) {
         echo $row[0] . "<br>";
@@ -53,4 +42,3 @@ if($db_list) {
     echo "No databases found.";
 }
 $conn->close();
-?>
