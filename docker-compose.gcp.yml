@@ -1,0 +1,35 @@
+# Docker Compose for GCP Cloud SQL testing
+# Use this when you want to test your app locally against Cloud SQL
+version: '3.8'
+
+services:
+  php-gcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    ports:
+      - "8080:8080"
+    container_name: php-gcp
+    restart: unless-stopped
+    environment:
+      # - DB_HOST=10.76.49.4  ## This is Internal IP, use for GCP VPC
+      - DB_HOST=34.61.52.150
+      - DB_NAME=channel
+      - DB_USER=channel
+      - DB_PASS=chen1qaz2wsx
+    volumes:
+      # Mount SSL certificates for Cloud SQL
+      - ./gcp-cloud-sql-server-ca.pem:/etc/ssl/certs/gcp-cloud-sql-server-ca.pem:ro
+      - ./gcp-cloud-sql-client-cert.pem:/etc/ssl/certs/gcp-cloud-sql-client-cert.pem:ro
+      - ./gcp-cloud-sql-client-key.pem:/etc/ssl/certs/gcp-cloud-sql-client-key.pem:ro
+      # Optional: Mount application files for development
+      - ./www/httpdocs:/var/www/httpdocs:ro
+    # Note: No MySQL service since we're using Cloud SQL
+    networks:
+      - gcp-network
+
+networks:
+  gcp-network:
+    driver: bridge
+
+# No volumes section since we're using external Cloud SQL

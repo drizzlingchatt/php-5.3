@@ -1,0 +1,110 @@
+# Dockerfile for PHP 5.3
+# Uses Ubuntu 14.04 as base (old, but compatible)
+FROM ubuntu:14.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies
+RUN apt-get update && \
+    apt-get install -y wget build-essential libxml2-dev libssl-dev libcurl4-openssl-dev libjpeg-dev libpng-dev libmcrypt-dev libreadline-dev libicu-dev libxslt1-dev libfreetype6-dev libxpm-dev pkg-config vim && \
+    apt-get clean
+
+# Install Apache and required modules
+RUN apt-get update && \
+    apt-get install -y apache2 apache2-dev && \
+    apt-get clean
+RUN ln -sf $(find /usr/lib -name 'libXpm.so*' | head -n 1) /usr/lib/libXpm.so
+RUN cp /etc/mime.types /etc/apache2/mime.types
+RUN mkdir -p /usr/include/freetype2/config && \
+    mkdir -p /usr/include/freetype2/freetype/ && \
+    for header in freetype.h ftsystem.h ftimage.h fttypes.h ftmodapi.h ft2build.h; do \
+      if [ -f /build-helpers/$header ]; then \
+        cp /build-helpers/$header /usr/include/freetype2/$header; \
+      else \
+        wget -O /usr/include/freetype2/$header https://raw.githubusercontent.com/freetype/freetype/master/include/freetype/$header || wget -O /usr/include/freetype2/$header https://raw.githubusercontent.com/freetype/freetype/master/include/$header; \
+      fi; \
+    done && \
+    for header in ftheader.h ftconfig.h; do \
+      if [ -f /build-helpers/$header ]; then \
+        cp /build-helpers/$header /usr/include/freetype2/config/$header; \
+      else \
+        wget -O /usr/include/freetype2/config/$header https://raw.githubusercontent.com/freetype/freetype/master/include/freetype/config/$header; \
+      fi; \
+    done && \
+    for f in /usr/include/freetype2/*.h; do ln -sf $f /usr/include/; done && \
+    for f in /usr/include/freetype2/config/*.h; do ln -sf $f /usr/include/; done && \
+    chmod 644 /usr/include/freetype2/*.h /usr/include/freetype2/config/*.h /usr/include/*.h || true && \
+    chown root:root /usr/include/freetype2/*.h /usr/include/freetype2/config/*.h /usr/include/*.h || true && \
+    mkdir -p /usr/include/freetype && \
+    cp /usr/include/freetype2/*.h /usr/include/freetype/ && \
+    cp /usr/include/freetype2/config/*.h /usr/include/freetype/ && \
+    cp /usr/include/freetype2/freetype.h /usr/include/freetype2/freetype/freetype.h
+
+# Download PHP 5.3 source
+WORKDIR /usr/src
+RUN wget https://museum.php.net/php5/php-5.3.29.tar.gz && \
+    tar -xzf php-5.3.29.tar.gz
+
+WORKDIR /usr/src/php-5.3.29
+# Fix linker error for ARM by setting LDFLAGS
+ENV LDFLAGS="-lstdc++"
+# Help PHP build find freetype.h
+ENV CPPFLAGS="-I/usr/include -I/usr/include/freetype2"
+COPY build-helpers/config.guess /usr/src/php-5.3.29/config.guess
+COPY build-helpers/config.sub /usr/src/php-5.3.29/config.sub
+RUN if [ ! -f /usr/src/php-5.3.29/config.guess ]; then \
+    wget -O /usr/src/php-5.3.29/config.guess "http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.guess;hb=HEAD"; \
+  fi && \
+  if [ ! -f /usr/src/php-5.3.29/config.sub ]; then \
+    wget -O /usr/src/php-5.3.29/config.sub "http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.sub;hb=HEAD"; \
+  fi
+
+RUN echo "Listing /usr/include for freetype headers:" && ls -l /usr/include | grep freetype && \
+    echo "Listing /usr/include/freetype2 for headers:" && ls -l /usr/include/freetype2
+
+RUN ./configure \
+    --prefix=/usr/local/php5.3 \
+    --with-config-file-path=/usr/local/php5.3/etc \
+    --with-config-file-scan-dir=/usr/local/php5.3/etc/conf.d \
+    --enable-mbstring \
+    --enable-zip \
+    --enable-soap \
+    --enable-intl \
+    --enable-bcmath \
+    --enable-mysqlnd \
+    --with-mysqli \
+    --with-pdo-mysql \
+    --with-curl \
+    --with-openssl \
+    --with-zlib \
+    --with-jpeg-dir \
+    --with-png-dir \
+    # --with-gd \
+    --with-freetype-dir=/usr/include \
+    --with-libdir=lib \
+    --with-xpm-dir=/usr/lib \
+    --with-mcrypt \
+    --with-xsl \
+    --with-readline \
+    --with-icu-dir=/usr \
+    --enable-cli \
+    --with-apxs2=/usr/bin/apxs && \
+    make -j$(nproc) && \
+    make install
+
+# Add PHP to PATH
+ENV PATH="/usr/local/php5.3/bin:$PATH"
+
+# Configure Apache to use PHP 5.3
+COPY config/apache2.conf /etc/apache2/apache2.conf
+COPY config/php.ini /usr/local/php5.3/etc/php.ini
+
+# Copy web files and set ownership
+COPY www /var/www
+RUN chown -R www-data:www-data /var/www
+RUN chmod -R 755 /var/www
+
+# Expose port 80
+EXPOSE 80
+
+CMD ["apachectl", "-D", "FOREGROUND"]

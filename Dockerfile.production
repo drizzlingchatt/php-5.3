@@ -1,0 +1,166 @@
+# Production Dockerfile for Cloud Run deployment
+# Optimized for PHP 5.3  application
+FROM ubuntu:14.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Add legacy Ubuntu 14.04 sources and install dependencies
+RUN sed -i 's/archive.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list && \
+    apt-get update && \
+    apt-get install -y wget build-essential libxml2-dev libssl-dev libcurl4-openssl-dev \
+    libjpeg-dev libpng-dev libmcrypt-dev libreadline-dev libicu-dev libxslt1-dev \
+    libfreetype6-dev libxpm-dev pkg-config libmysqlclient-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy MySQL client dev files 
+RUN wget https://downloads.mysql.com/archives/get/p/23/file/mysql-5.5.62-linux-glibc2.12-x86_64.tar.gz -O /tmp/mysql-5.5.62-linux-glibc2.12-x86_64.tar.gz
+RUN if [ ! -f /usr/lib/libmysqlclient.so ] || [ ! -f /usr/include/mysql/mysql.h ]; then \
+    echo "MySQL client files missing, extracting MySQL 5.5 client dev tarball..."; \
+    cd /tmp && \
+    tar -xzf mysql-5.5.62-linux-glibc2.12-x86_64.tar.gz && \
+    mkdir -p /usr/include/mysql && \
+    cp -r mysql-5.5.62-linux-glibc2.12-x86_64/include/* /usr/include/mysql/ && \
+    cp -r mysql-5.5.62-linux-glibc2.12-x86_64/lib/libmysqlclient.so* /usr/lib/ && \
+    rm -rf /tmp/mysql-5.5.62-linux-glibc2.12-x86_64*; \
+    fi
+
+# Install Apache and required modules
+RUN apt-get update && \
+    apt-get install -y apache2 apache2-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Setup library links and headers
+RUN ln -sf $(find /usr/lib -name 'libXpm.so*' | head -n 1) /usr/lib/libXpm.so && \
+    cp /etc/mime.types /etc/apache2/mime.types
+
+# Setup FreeType headers
+RUN mkdir -p /usr/include/freetype2/config && \
+    mkdir -p /usr/include/freetype2/freetype/
+
+# Copy pre-built FreeType headers
+COPY build-helpers/freetype.h /usr/include/freetype2/freetype.h
+COPY build-helpers/ftsystem.h /usr/include/freetype2/ftsystem.h
+COPY build-helpers/ftimage.h /usr/include/freetype2/ftimage.h
+COPY build-helpers/fttypes.h /usr/include/freetype2/fttypes.h
+COPY build-helpers/ftmodapi.h /usr/include/freetype2/ftmodapi.h
+COPY build-helpers/ft2build.h /usr/include/freetype2/ft2build.h
+COPY build-helpers/ftheader.h /usr/include/freetype2/config/ftheader.h
+COPY build-helpers/ftconfig.h /usr/include/freetype2/config/ftconfig.h
+
+# Create symlinks for headers
+RUN for f in /usr/include/freetype2/*.h; do ln -sf $f /usr/include/; done && \
+    for f in /usr/include/freetype2/config/*.h; do ln -sf $f /usr/include/; done && \
+    mkdir -p /usr/include/freetype && \
+    cp /usr/include/freetype2/*.h /usr/include/freetype/ && \
+    cp /usr/include/freetype2/config/*.h /usr/include/freetype/ && \
+    cp /usr/include/freetype2/freetype.h /usr/include/freetype2/freetype/freetype.h
+
+# Download and build PHP 5.3
+WORKDIR /usr/src
+RUN wget https://museum.php.net/php5/php-5.3.29.tar.gz && \
+    tar -xzf php-5.3.29.tar.gz && \
+    rm php-5.3.29.tar.gz
+
+# Setup MySQL libraries
+RUN mkdir -p /usr/include/mysql && \
+    cp -a /usr/lib/x86_64-linux-gnu/libmysqlclient.so* /usr/lib/ 2>/dev/null || true && \
+    cp -a /usr/lib/libmysqlclient.so* /usr/lib/ 2>/dev/null || true
+
+WORKDIR /usr/src/php-5.3.29
+
+# Copy config files and set environment
+ENV LDFLAGS="-lstdc++ -L/usr/lib/x86_64-linux-gnu -L/usr/lib"
+ENV CPPFLAGS="-I/usr/include -I/usr/include/freetype2 -I/usr/include/mysqlclient -I/usr/include/mysql"
+COPY build-helpers/config.guess /usr/src/php-5.3.29/config.guess
+COPY build-helpers/config.sub /usr/src/php-5.3.29/config.sub
+
+# Configure and build PHP 5.3
+RUN ./configure \
+    --prefix=/usr/local/php5.3 \
+    --with-config-file-path=/usr/local/php5.3/etc \
+    --with-config-file-scan-dir=/usr/local/php5.3/etc/conf.d \
+    --enable-mbstring \
+    --enable-zip \
+    --enable-soap \
+    --enable-intl \
+    --enable-bcmath \
+    --enable-mysqlnd \
+    --with-mysqli \
+    --with-pdo-mysql \
+    --with-mysql=/usr \
+    --with-mysql-sock=/var/run/mysqld/mysqld.sock \
+    --with-curl \
+    --with-openssl \
+    --with-zlib \
+    --with-jpeg-dir \
+    --with-png-dir \
+    --with-freetype-dir=/usr/include \
+    --with-libdir=lib \
+    --with-xpm-dir=/usr/lib \
+    --with-mcrypt \
+    --with-xsl \
+    --with-readline \
+    --with-icu-dir=/usr \
+    --enable-cli \
+    --with-apxs2=/usr/bin/apxs && \
+    make -j$(nproc) && \
+    make install
+
+# Clean up build dependencies to reduce image size
+RUN rm -rf /usr/src/php-5.3.29 && \
+    apt-get purge -y build-essential wget && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Add PHP to PATH
+ENV PATH="/usr/local/php5.3/bin:$PATH"
+
+# Copy production Apache configuration (modified for Cloud Run port 8080)
+COPY config/apache2.conf /etc/apache2/apache2.conf
+
+# Update Apache to listen on port 8080 for Cloud Run
+RUN sed -i 's/Listen 80/Listen 8080/' /etc/apache2/apache2.conf
+
+# Copy PHP configuration
+COPY config/php.ini /usr/local/php5.3/etc/php.ini
+
+# Copy application files
+COPY www/httpdocs/ /var/www/httpdocs/
+
+# Copy SSL certificates for Cloud SQL connection
+COPY gcp-*.pem /etc/ssl/certs/
+
+# Set proper permissions
+RUN chown -R www-data:www-data /var/www && \
+    chmod -R 755 /var/www && \
+    chmod 644 /etc/ssl/certs/gcp-*.pem
+
+# Create a startup script for production
+RUN echo '#!/bin/bash\n\
+    echo "Starting PHP 5.3 Application"\n\
+    echo "Database Host: ${DB_HOST:-10.76.49.4}"\n\
+    echo "Database Name: ${DB_NAME:-channel}"\n\
+    # Update database configuration if environment variables are provided\n\
+    if [ ! -z "$DB_HOST" ]; then\n\
+    if [ -f /var/www/httpdocs/application/config/database.php ]; then\n\
+    sed -i "s/mysql/$DB_HOST/g" /var/www/httpdocs/application/config/database.php\n\
+    fi\n\
+    # Update other PHP files that might have hardcoded database connections\n\
+    find /var/www/httpdocs -name "*.php" -exec sed -i "s/\"mysql\"/\"$DB_HOST\"/g" {} +\n\
+    fi\n\
+    # Start Apache in foreground\n\
+    exec apache2ctl -D FOREGROUND' > /start.sh && \
+    chmod +x /start.sh
+
+# Expose port 8080 for Cloud Run
+EXPOSE 8080
+
+# Health check for Cloud Run
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/ || exit 1
+
+# Use the startup script
+CMD ["/start.sh"]

@@ -1,0 +1,47 @@
+services:
+  php:
+    build: .
+    ports:
+      - "80:80"
+    container_name: php
+    restart: unless-stopped
+    volumes:
+      - ./www:/var/www
+      - ./config/apache2.conf:/etc/apache2/apache2.conf
+      - ./config/php.ini:/usr/local/php5.3/etc/php.ini
+    depends_on:
+      - mysql
+
+  mysql:
+    image: mysql:5.7
+    platform: linux/amd64
+    container_name: mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: yWuSRG6an436
+      MYSQL_DATABASE: channel
+      MYSQL_USER: channel
+      MYSQL_PASSWORD: chen1qaz2wsx
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./config/my.cnf:/etc/mysql/conf.d/my.cnf
+      - mysql_data:/var/lib/mysql
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    platform: linux/amd64
+    container_name: phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: channel
+      PMA_PASSWORD: chen1qaz2wsx
+      PMA_ARBITRARY: 1
+    ports:
+      - "8080:80"
+    depends_on:
+      - mysql
+
+volumes:
+  mysql_data:
