@@ -11,7 +11,7 @@
 1. **Clone the repository**
    ```bash
    git clone <your-repo-url>
-   cd php-5.3.3
+   cd php-5.3
    ```
 
 2. **Start the development environment**
